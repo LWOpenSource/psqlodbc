@@ -16,7 +16,7 @@ env:
 
   # PostgreSQL build from source.
   POSTGRESQL_SOURCE_TAG: 'REL_18_STABLE'
-  OPENSSL_VERSION: '3_5_6'
+  OPENSSL_VERSION: '3_5_7'
   PKGCONFIGLITE_VERSION: '0.28-1'
   WINFLEXBISON_VERSION: '2.5.24'
   WORKFLOW_VERSION_POSTGRESQL: '1' # increment to invalidate cache
@@ -305,6 +305,8 @@ jobs:
         echo on
         C:\OTHERBIN\postgresql_install.exe --mode unattended --unattendedmodeui none --superpassword password --enable-components server
         sc config "postgresql-x64-17" start= auto
+        sc start "postgresql-x64-17"
+        ping -n 6 127.0.0.1 >nul
 
     # -----------------------------------------------------------------
     # Build and test psqlodbc
