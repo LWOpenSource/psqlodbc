@@ -17,9 +17,6 @@ env:
   # PostgreSQL build from source.
   POSTGRESQL_SOURCE_TAG: 'REL_18_STABLE'
   OPENSSL_VERSION: '3_5_7'
-  # OpenSSL is built from source for arm64 (no reliable prebuilt arm64 installer);
-  # this is the git tag in https://github.com/openssl/openssl to build.
-  OPENSSL_ARM64_TAG: 'openssl-3.5.7'
   WORKFLOW_VERSION_POSTGRESQL_ARM64: '1' # increment to invalidate the arm64 cache
   PKGCONFIGLITE_VERSION: '0.28-1'
   WINFLEXBISON_VERSION: '2.5.24'
@@ -398,10 +395,11 @@ jobs:
         if-no-files-found: error
 
   # =====================================================================
-  # Build PostgreSQL arm64 (full, from source) for Windows on Arm
+  # Build PostgreSQL arm64 (libpq only, from source) for Windows on Arm
   #
-  # The windows-11-arm image has no prebuilt arm64 OpenSSL/PostgreSQL, so
-  # OpenSSL and libpq are built from source natively. Only libpq is built:
+  # The windows-11-arm image has no prebuilt arm64 PostgreSQL, so libpq is
+  # built from source natively (OpenSSL comes from the slproweb prebuilt
+  # arm64 installer, same as the x86/x64 jobs). Only libpq is built:
   # the full server does not build for aarch64 (PostgreSQL's msvc_gendef.pl
   # rejects the arch when generating postgres.def), and the driver only needs
   # libpq. The regression test server is a separate x64 EDB install (run under
@@ -414,18 +412,18 @@ jobs:
     steps:
     - name: Cache libpq arm64 build output
       uses: actions/cache@v4
-      id: cachePostgresArm
+      id: cachePostgres
       with:
         path: C:\postgresql_arm64
-        key: postgresql-arm64-${{env.POSTGRESQL_SOURCE_TAG}}_openssl-${{env.OPENSSL_ARM64_TAG}}_workflow-${{env.WORKFLOW_VERSION_POSTGRESQL_ARM64}}
+        key: postgresql-arm64-${{env.POSTGRESQL_SOURCE_TAG}}_openssl-${{env.OPENSSL_VERSION}}_pkgconfiglite-${{env.PKGCONFIGLITE_VERSION}}_winflexbison-${{env.WINFLEXBISON_VERSION}}_workflow-${{env.WORKFLOW_VERSION_POSTGRESQL_ARM64}}
 
     # -----------------------------------------------------------------
     # Source code
     # -----------------------------------------------------------------
     - name: Cache PostgreSQL source
-      if: steps.cachePostgresArm.outputs.cache-hit != 'true'
+      if: steps.cachePostgres.outputs.cache-hit != 'true'
       uses: actions/cache@v4
-      id: cachePgSourceArm
+      id: cachePgSource
       with:
         path: postgres
         # Distinct from the x64 job's pg-source key: that cache contains an
@@ -433,7 +431,7 @@ jobs:
         # a C:-based arm64 reconfigure.
         key: pg-source-arm64-${{env.POSTGRESQL_SOURCE_TAG}}
     - name: Get PostgreSQL source
-      if: steps.cachePostgresArm.outputs.cache-hit != 'true' && steps.cachePgSourceArm.outputs.cache-hit != 'true'
+      if: steps.cachePostgres.outputs.cache-hit != 'true' && steps.cachePgSource.outputs.cache-hit != 'true'
       uses: actions/checkout@v4
       with:
         repository: "postgres/postgres.git"
@@ -444,109 +442,90 @@ jobs:
     # Build tools
     # -----------------------------------------------------------------
     - name: Install meson and ninja
-      if: steps.cachePostgresArm.outputs.cache-hit != 'true'
+      if: steps.cachePostgres.outputs.cache-hit != 'true'
       run: python -m pip install meson ninja
 
     - name: Cache winflexbison
-      if: steps.cachePostgresArm.outputs.cache-hit != 'true'
+      if: steps.cachePostgres.outputs.cache-hit != 'true'
       uses: actions/cache@v4
-      id: cacheWinFlexBisonArm
+      id: cacheWinFlexBison
       with:
         path: C:\OTHERBIN\winflexbison
         key: winflexbison-${{env.WINFLEXBISON_VERSION}}
       env:
         SEGMENT_DOWNLOAD_TIMEOUT_MINS: 1
     - name: Download winflexbison
-      if: steps.cachePostgresArm.outputs.cache-hit != 'true' && steps.cacheWinFlexBisonArm.outputs.cache-hit != 'true'
+      if: steps.cachePostgres.outputs.cache-hit != 'true' && steps.cacheWinFlexBison.outputs.cache-hit != 'true'
       uses: suisei-cn/actions-download-file@v1.6.0
+      id: downloadWinFlexBison
       with:
         retry-times: 5
         url: https://sourceforge.net/projects/winflexbison/files/win_flex_bison-${{env.WINFLEXBISON_VERSION}}.zip
         filename: win_flex_bison.zip
     - name: Extract winflexbison
-      if: steps.cachePostgresArm.outputs.cache-hit != 'true' && steps.cacheWinFlexBisonArm.outputs.cache-hit != 'true'
+      if: steps.cachePostgres.outputs.cache-hit != 'true' && steps.cacheWinFlexBison.outputs.cache-hit != 'true'
       shell: cmd
       run: |
         mkdir "C:\OTHERBIN\winflexbison"
         7z x win_flex_bison.zip -o"C:\OTHERBIN\winflexbison"
     - name: Add winflexbison to PATH
-      if: steps.cachePostgresArm.outputs.cache-hit != 'true'
+      if: steps.cachePostgres.outputs.cache-hit != 'true'
       shell: cmd
       run: printf "C:\OTHERBIN\\winflexbison" >> %GITHUB_PATH%
 
     - name: Cache pkgconfiglite
-      if: steps.cachePostgresArm.outputs.cache-hit != 'true'
+      if: steps.cachePostgres.outputs.cache-hit != 'true'
       uses: actions/cache@v4
-      id: cachePkgConfigLiteArm
+      id: cachePkgConfigLite
       with:
         path: C:\OTHERBIN\pkgconfiglite
         key: pkg-config-lite-${{env.PKGCONFIGLITE_VERSION}}-win32
       env:
         SEGMENT_DOWNLOAD_TIMEOUT_MINS: 1
     - name: Download pkgconfiglite
-      if: steps.cachePostgresArm.outputs.cache-hit != 'true' && steps.cachePkgConfigLiteArm.outputs.cache-hit != 'true'
+      if: steps.cachePostgres.outputs.cache-hit != 'true' && steps.cachePkgConfigLite.outputs.cache-hit != 'true'
       uses: suisei-cn/actions-download-file@v1.6.0
+      id: downloadPkgConfigLite
       with:
         retry-times: 5
         url: http://downloads.sourceforge.net/project/pkgconfiglite/${{env.PKGCONFIGLITE_VERSION}}/pkg-config-lite-${{env.PKGCONFIGLITE_VERSION}}_bin-win32.zip
         filename: pkg-config-lite_bin-win32.zip
     - name: Extract pkgconfiglite
-      if: steps.cachePostgresArm.outputs.cache-hit != 'true' && steps.cachePkgConfigLiteArm.outputs.cache-hit != 'true'
+      if: steps.cachePostgres.outputs.cache-hit != 'true' && steps.cachePkgConfigLite.outputs.cache-hit != 'true'
       shell: cmd
       run: |
         mkdir "C:\OTHERBIN\pkgconfiglite"
         7z x pkg-config-lite_bin-win32.zip -o"C:\OTHERBIN\pkgconfiglite"
     - name: Add pkgconfiglite to PATH
-      if: steps.cachePostgresArm.outputs.cache-hit != 'true'
+      if: steps.cachePostgres.outputs.cache-hit != 'true'
       shell: cmd
       run: printf "C:\\OTHERBIN\\pkgconfiglite\\pkg-config-lite-%PKGCONFIGLITE_VERSION%\\bin" >> %GITHUB_PATH%
 
     # -----------------------------------------------------------------
-    # Native arm64 MSVC toolchain
+    # OpenSSL arm64 (prebuilt slproweb installer; required for release
+    # installers). Mirrors the x86/x64 jobs: download the silent Inno
+    # Setup installer and install it. Cached so a libpq-cache miss does
+    # not force a re-download.
     # -----------------------------------------------------------------
-    - name: Setup MSVC arm64
-      if: steps.cachePostgresArm.outputs.cache-hit != 'true'
-      uses: TheMrMilchmann/setup-msvc-dev@v3
-      with:
-        arch: arm64
-
-    # -----------------------------------------------------------------
-    # OpenSSL arm64 (built from source; required for release installers).
-    # Uses the runner's Strawberry Perl + the arm64 MSVC toolset.
-    #
-    # OpenSSL has its own cache (keyed by the OpenSSL tag) and is saved
-    # immediately after it builds, so it survives failures in later steps
-    # and libpq-cache misses -- avoiding a ~9 min recompile on every
-    # iteration. On a hit, the compile below is skipped.
-    # -----------------------------------------------------------------
-    - name: Restore OpenSSL arm64 from cache
-      if: steps.cachePostgresArm.outputs.cache-hit != 'true'
-      id: cacheOpenSSLArm
-      uses: actions/cache/restore@v4
+    - name: Cache Win64ARM OpenSSL
+      if: steps.cachePostgres.outputs.cache-hit != 'true'
+      uses: actions/cache@v4
+      id: cacheWin64ARMOpenSSL
       with:
         path: C:\OTHERBIN\openssl_arm64
-        key: openssl-arm64-${{env.OPENSSL_ARM64_TAG}}
-    - name: Get OpenSSL source
-      if: steps.cachePostgresArm.outputs.cache-hit != 'true' && steps.cacheOpenSSLArm.outputs.cache-hit != 'true'
-      uses: actions/checkout@v4
+        key: Win64ARMOpenSSL-${{env.OPENSSL_VERSION}}
+    - name: Download Win64ARM OpenSSL
+      if: steps.cachePostgres.outputs.cache-hit != 'true' && steps.cacheWin64ARMOpenSSL.outputs.cache-hit != 'true'
+      uses: suisei-cn/actions-download-file@v1.6.0
+      id: downloadWin64ARMOpenSSL
       with:
-        repository: "openssl/openssl"
-        ref: ${{env.OPENSSL_ARM64_TAG}}
-        path: openssl
-    - name: Build and install OpenSSL arm64
-      if: steps.cachePostgresArm.outputs.cache-hit != 'true' && steps.cacheOpenSSLArm.outputs.cache-hit != 'true'
-      working-directory: openssl
+        retry-times: 5
+        url: https://slproweb.com/download/Win64ARMOpenSSL-${{env.OPENSSL_VERSION}}.exe
+        filename: Win64ARMOpenSSL.exe
+    - name: Install Win64ARM OpenSSL
+      if: steps.cachePostgres.outputs.cache-hit != 'true' && steps.cacheWin64ARMOpenSSL.outputs.cache-hit != 'true'
       shell: cmd
-      run: |
-        perl Configure VC-WIN64-ARM no-tests --prefix=c:\OTHERBIN\openssl_arm64 --openssldir=c:\OTHERBIN\openssl_arm64\ssl
-        nmake
-        nmake install_sw
-    - name: Save OpenSSL arm64 to cache
-      if: steps.cachePostgresArm.outputs.cache-hit != 'true' && steps.cacheOpenSSLArm.outputs.cache-hit != 'true'
-      uses: actions/cache/save@v4
-      with:
-        path: C:\OTHERBIN\openssl_arm64
-        key: openssl-arm64-${{env.OPENSSL_ARM64_TAG}}
+      run: Win64ARMOpenSSL.exe /sp /silent /dir=c:\OTHERBIN\openssl_arm64
 
     # -----------------------------------------------------------------
     # Build libpq arm64 only (with SSL).
@@ -556,23 +535,28 @@ jobs:
     # x86 libpq-only build in the x64 job. A minimal libpq SDK (lib + dll +
     # the client headers psqlodbc needs) is assembled under C:\postgresql_arm64.
     # -----------------------------------------------------------------
+    - name: Setup MSVC arm64
+      if: steps.cachePostgres.outputs.cache-hit != 'true'
+      uses: TheMrMilchmann/setup-msvc-dev@v3
+      with:
+        arch: arm64
     - name: Build libpq arm64
-      if: steps.cachePostgresArm.outputs.cache-hit != 'true'
+      if: steps.cachePostgres.outputs.cache-hit != 'true'
       working-directory: postgres
       shell: pwsh
       run: |
         # Always configure a clean arm64 build dir (never reuse a stale or
         # cross-arch meson configuration).
         if (Test-Path build) { Remove-Item -Recurse -Force build }
-        meson setup build -Dssl=openssl -Dextra_lib_dirs=c:\OTHERBIN\openssl_arm64\lib -Dextra_include_dirs=c:\OTHERBIN\openssl_arm64\include --prefix=C:\postgresql_arm64
+        meson setup build -Dssl=openssl -Dextra_lib_dirs=c:\OTHERBIN\openssl_arm64\lib\VC\arm64\MT -Dextra_include_dirs=c:\OTHERBIN\openssl_arm64\include --prefix=C:\postgresql_arm64
 
         # Build only the libpq client library (and its dependencies).
         meson compile -C build src/interfaces/libpq/libpq:shared_library
 
         # Assemble a minimal libpq SDK layout at C:\postgresql_arm64.
         New-Item -ItemType Directory -Force -Path C:\postgresql_arm64\lib, C:\postgresql_arm64\bin, C:\postgresql_arm64\include | Out-Null
-        Get-ChildItem build -Recurse -Filter libpq.lib | Select-Object -First 1 | Copy-Item -Destination C:\postgresql_arm64\lib\
-        Get-ChildItem build -Recurse -Filter libpq.dll | Select-Object -First 1 | Copy-Item -Destination C:\postgresql_arm64\bin\
+        Get-ChildItem build -Recurse -Filter "libpq.lib" | Copy-Item -Destination C:\postgresql_arm64\lib\
+        Get-ChildItem build -Recurse -Filter "libpq.dll" | Copy-Item -Destination C:\postgresql_arm64\bin\
 
         # Headers: reproduce a PostgreSQL install-style include layout so the
         # driver builds. psqlodbc includes <libpq-fe.h>, "pqexpbuffer.h" and
@@ -591,7 +575,8 @@ jobs:
         Copy-Item -Recurse -Force "$gen\*" "$inc\server"
 
         # OpenSSL runtime DLLs alongside libpq (needed at load time and by the installer).
-        Copy-Item c:\OTHERBIN\openssl_arm64\bin\*.dll C:\postgresql_arm64\bin\
+        # The slproweb installer places the DLLs at the install root (like x86/x64).
+        Copy-Item c:\OTHERBIN\openssl_arm64\*.dll C:\postgresql_arm64\bin\
 
   # =====================================================================
   # Build and test psqlodbc arm64 (standard and mimalloc, in parallel)
@@ -617,7 +602,7 @@ jobs:
       uses: actions/cache/restore@v4
       with:
         path: C:\postgresql_arm64
-        key: postgresql-arm64-${{env.POSTGRESQL_SOURCE_TAG}}_openssl-${{env.OPENSSL_ARM64_TAG}}_workflow-${{env.WORKFLOW_VERSION_POSTGRESQL_ARM64}}
+        key: postgresql-arm64-${{env.POSTGRESQL_SOURCE_TAG}}_openssl-${{env.OPENSSL_VERSION}}_pkgconfiglite-${{env.PKGCONFIGLITE_VERSION}}_winflexbison-${{env.WINFLEXBISON_VERSION}}_workflow-${{env.WORKFLOW_VERSION_POSTGRESQL_ARM64}}
         fail-on-cache-miss: true
 
     # -----------------------------------------------------------------
